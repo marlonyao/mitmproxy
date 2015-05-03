@@ -204,6 +204,9 @@ class FlowContent(RequestHandler):
         self.set_header("X-Frame-Options", "DENY")
         self.write(message.content)
 
+    def put(self, flow_id, message):
+        message = getattr(self.flow, message)
+        message.content = self.request.body
 
 class Events(RequestHandler):
     def get(self):

@@ -3,6 +3,8 @@ var _ = require("lodash");
 
 var MessageUtils = require("../../flow/utils.js").MessageUtils;
 var utils = require("../../utils.js");
+var ValueEditor = require("../editor.js").ValueEditor;
+var actions = require("../../actions.js");
 
 var image_regex = /^image\/(png|jpe?g|gif|vnc.microsoft.icon|x-icon)$/i;
 var ViewImage = React.createClass({
@@ -78,7 +80,15 @@ var ViewRaw = React.createClass({
         }
     },
     renderContent: function () {
-        return <pre>{this.state.content}</pre>;
+        //return <pre>{this.state.content}</pre>;
+        return <ValueEditor
+                ref="content"
+                content={this.state.content}
+                onDone={this.onContentChange}
+                inline/>
+    },
+    onContentChange: function (content) {
+        actions.FlowActions.updateContent(this.props.flow, this.props.message, content);
     }
 });
 

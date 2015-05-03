@@ -305,6 +305,7 @@ function isUndefined(arg) {
 var $ = require("jquery");
 var _ = require("lodash");
 var AppDispatcher = require("./dispatcher.js").AppDispatcher;
+var MessageUtils = require("./flow/utils.js").MessageUtils;
 
 var ActionTypes = {
     // Connection
@@ -419,6 +420,15 @@ var FlowActions = {
             data: JSON.stringify(nextProps)
         });
     },
+    updateContent: function(flow, message, nextContent) {
+        var contentURL = MessageUtils.getContentURL(flow, message);
+        $.ajax({
+            type: "PUT",
+            url: contentURL,
+            contentType: 'application/octet-stream',
+            data: nextContent
+        });
+    },
     clear: function(){
         $.post("/clear");
     }
@@ -440,7 +450,8 @@ module.exports = {
     Query: Query
 };
 
-},{"./dispatcher.js":21,"jquery":"jquery","lodash":"lodash"}],3:[function(require,module,exports){
+
+},{"./dispatcher.js":21,"./flow/utils.js":23,"jquery":"jquery","lodash":"lodash"}],3:[function(require,module,exports){
 var React = require("react");
 var ReactRouter = require("react-router");
 var $ = require("jquery");
@@ -696,7 +707,7 @@ var nodeToContent = function (node) {
 };
 
 /*
-Basic Editor Functionality
+ Basic Editor Functionality
  */
 var EditorBase = React.createClass({displayName: "EditorBase",
     propTypes: {
@@ -704,6 +715,7 @@ var EditorBase = React.createClass({displayName: "EditorBase",
         onDone: React.PropTypes.func.isRequired,
         contentToHtml: React.PropTypes.func,
         nodeToContent: React.PropTypes.func, // content === nodeToContent( Node<innerHTML=contentToHtml(content)> )
+        onStop: React.PropTypes.func,
         submitOnEnter: React.PropTypes.bool,
         className: React.PropTypes.string,
         tag: React.PropTypes.string
@@ -732,6 +744,8 @@ var EditorBase = React.createClass({displayName: "EditorBase",
             className: className, 
             contentEditable: this.state.editable || undefined, // workaround: use undef instead of false to remove attr
             onFocus: this.onFocus, 
+            onMouseDown: this.onMouseDown, 
+            onClick: this.onClick, 
             onBlur: this._stop, 
             onKeyDown: this.onKeyDown, 
             onInput: this.onInput, 
@@ -739,29 +753,75 @@ var EditorBase = React.createClass({displayName: "EditorBase",
             dangerouslySetInnerHTML: html})
         );
     },
-    onPaste: function(e){
+    onPaste: function (e) {
         e.preventDefault();
         var content = e.clipboardData.getData("text/plain");
         document.execCommand("insertHTML", false, content);
     },
+    onMouseDown: function (e) {
+        this._mouseDown = true;
+        window.addEventListener("mouseup", this.onMouseUp);
+        this.props.onMouseDown && this.props.onMouseDown(e);
+    },
+    onMouseUp: function () {
+        if (this._mouseDown) {
+            this._mouseDown = false;
+            window.removeEventListener("mouseup", this.onMouseUp)
+        }
+    },
+    onClick: function (e) {
+        this.onMouseUp();
+        this.onFocus(e);
+    },
     onFocus: function (e) {
+        console.log("onFocus", this._mouseDown, this._ignore_events, this.state.editable);
+        if (this._mouseDown || this._ignore_events || this.state.editable) {
+            return;
+        }
+
+        //contenteditable in FireFox is more or less broken.
+        // - we need to blur() and then focus(), otherwise the caret is not shown.
+        // - blur() + focus() == we need to save the caret position before
+        //   Firefox sometimes just doesn't set a caret position => use caretPositionFromPoint
+        var sel = window.getSelection();
+        var range;
+        if (sel.rangeCount > 0) {
+            range = sel.getRangeAt(0);
+        } else if (document.caretPositionFromPoint && e.clientX && e.clientY) {
+            var pos = document.caretPositionFromPoint(e.clientX, e.clientY);
+            range = document.createRange();
+            range.setStart(pos.offsetNode, pos.offset);
+        } else if (document.caretRangeFromPoint && e.clientX && e.clientY) {
+            range = document.caretRangeFromPoint(e.clientX, e.clientY);
+        } else {
+            range = document.createRange();
+            range.selectNodeContents(React.findDOMNode(this));
+        }
+
+        this._ignore_events = true;
         this.setState({editable: true}, function () {
-            React.findDOMNode(this).focus();
-            var range = document.createRange();
-            range.selectNodeContents(this.getDOMNode());
-            var sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
+            var node = React.findDOMNode(this);
+            node.blur();
+            node.focus();
+            this._ignore_events = false;
+            //sel.removeAllRanges();
+            //sel.addRange(range);
+
+
         });
-        this.props.onFocus && this.props.onFocus(e);
     },
     stop: function () {
         // a stop would cause a blur as a side-effect.
         // but a blur event must trigger a stop as well.
         // to fix this, make stop = blur and do the actual stop in the onBlur handler.
         React.findDOMNode(this).blur();
+        this.props.onStop && this.props.onStop();
     },
     _stop: function (e) {
+        if (this._ignore_events) {
+            return;
+        }
+        console.log("_stop", _.extend({}, e));
         window.getSelection().removeAllRanges(); //make sure that selection is cleared on blur
         var node = React.findDOMNode(this);
         var content = this.props.nodeToContent(node);
@@ -769,16 +829,16 @@ var EditorBase = React.createClass({displayName: "EditorBase",
         this.props.onDone(content);
         this.props.onBlur && this.props.onBlur(e);
     },
-    cancel: function () {
+    reset: function () {
         React.findDOMNode(this).innerHTML = this.props.contentToHtml(this.props.content);
-        this.stop();
     },
     onKeyDown: function (e) {
         e.stopPropagation();
         switch (e.keyCode) {
             case utils.Key.ESC:
                 e.preventDefault();
-                this.cancel();
+                this.reset();
+                this.stop();
                 break;
             case utils.Key.ENTER:
                 if (this.props.submitOnEnter && !e.shiftKey) {
@@ -798,7 +858,7 @@ var EditorBase = React.createClass({displayName: "EditorBase",
 });
 
 /*
-Add Validation to EditorBase
+ Add Validation to EditorBase
  */
 var ValidateEditor = React.createClass({displayName: "ValidateEditor",
     propTypes: {
@@ -808,15 +868,15 @@ var ValidateEditor = React.createClass({displayName: "ValidateEditor",
         isValid: React.PropTypes.func,
         className: React.PropTypes.string,
     },
-    getInitialState: function(){
+    getInitialState: function () {
         return {
             currentContent: this.props.content
         };
     },
-    componentWillReceiveProps: function(){
+    componentWillReceiveProps: function () {
         this.setState({currentContent: this.props.content});
     },
-    onInput: function(content){
+    onInput: function (content) {
         this.setState({currentContent: content});
         this.props.onInput && this.props.onInput(content);
     },
@@ -838,8 +898,8 @@ var ValidateEditor = React.createClass({displayName: "ValidateEditor",
         );
     },
     onDone: function (content) {
-        if(this.props.isValid && !this.props.isValid(content)){
-            this.refs.editor.cancel();
+        if (this.props.isValid && !this.props.isValid(content)) {
+            this.refs.editor.reset();
             content = this.props.content;
         }
         this.props.onDone(content);
@@ -847,7 +907,7 @@ var ValidateEditor = React.createClass({displayName: "ValidateEditor",
 });
 
 /*
-Text Editor with mitmweb-specific convenience features
+ Text Editor with mitmweb-specific convenience features
  */
 var ValueEditor = React.createClass({displayName: "ValueEditor",
     mixins: [common.ChildFocus],
@@ -860,18 +920,15 @@ var ValueEditor = React.createClass({displayName: "ValueEditor",
         var tag = this.props.inline ? "span" : "div";
         return React.createElement(ValidateEditor, React.__spread({}, 
             this.props, 
-            {onBlur: this.onBlur, 
+            {onStop: this.onStop, 
             tag: tag})
         );
     },
     focus: function () {
         React.findDOMNode(this).focus();
     },
-    onBlur: function(e){
-        if(!e.relatedTarget){
-            this.returnFocus();
-        }
-        this.props.onBlur && this.props.onBlur(e);
+    onStop: function () {
+        this.returnFocus();
     }
 });
 
@@ -1429,6 +1486,8 @@ var _ = require("lodash");
 
 var MessageUtils = require("../../flow/utils.js").MessageUtils;
 var utils = require("../../utils.js");
+var ValueEditor = require("../editor.js").ValueEditor;
+var actions = require("../../actions.js");
 
 var image_regex = /^image\/(png|jpe?g|gif|vnc.microsoft.icon|x-icon)$/i;
 var ViewImage = React.createClass({displayName: "ViewImage",
@@ -1504,7 +1563,15 @@ var ViewRaw = React.createClass({displayName: "ViewRaw",
         }
     },
     renderContent: function () {
-        return React.createElement("pre", null, this.state.content);
+        //return <pre>{this.state.content}</pre>;
+        return React.createElement(ValueEditor, {
+                ref: "content", 
+                content: this.state.content, 
+                onDone: this.onContentChange, 
+                inline: true})
+    },
+    onContentChange: function (content) {
+        actions.FlowActions.updateContent(this.props.flow, this.props.message, content);
     }
 });
 
@@ -1662,7 +1729,8 @@ var ContentView = React.createClass({displayName: "ContentView",
 
 module.exports = ContentView;
 
-},{"../../flow/utils.js":23,"../../utils.js":26,"lodash":"lodash","react":"react"}],10:[function(require,module,exports){
+
+},{"../../actions.js":2,"../../flow/utils.js":23,"../../utils.js":26,"../editor.js":5,"lodash":"lodash","react":"react"}],10:[function(require,module,exports){
 var React = require("react");
 var _ = require("lodash");
 

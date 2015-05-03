@@ -1,6 +1,7 @@
 var $ = require("jquery");
 var _ = require("lodash");
 var AppDispatcher = require("./dispatcher.js").AppDispatcher;
+var MessageUtils = require("./flow/utils.js").MessageUtils;
 
 var ActionTypes = {
     // Connection
@@ -113,6 +114,15 @@ var FlowActions = {
             url: "/flows/" + flow.id,
             contentType: 'application/json',
             data: JSON.stringify(nextProps)
+        });
+    },
+    updateContent: function(flow, message, nextContent) {
+        var contentURL = MessageUtils.getContentURL(flow, message);
+        $.ajax({
+            type: "PUT",
+            url: contentURL,
+            contentType: 'application/octet-stream',
+            data: nextContent
         });
     },
     clear: function(){

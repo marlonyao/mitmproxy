@@ -1,3 +1,4 @@
+# coding: utf-8
 from __future__ import print_function, absolute_import
 import os
 import signal
@@ -139,6 +140,10 @@ def mitmdump(args=None):  # pragma: nocover
 
 def mitmweb(args=None):  # pragma: nocover
     from . import web
+
+    # 输出请求日志
+    from tornado.log import enable_pretty_logging
+    enable_pretty_logging()
 
     check_versions()
     parser = cmdline.mitmweb()
