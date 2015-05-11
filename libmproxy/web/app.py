@@ -206,6 +206,7 @@ class FlowContent(RequestHandler):
 
     def put(self, flow_id, message):
         message = getattr(self.flow, message)
+        del message.headers['Content-Encoding']
         message.content = self.request.body
 
 class Events(RequestHandler):

@@ -1563,16 +1563,18 @@ var ViewRaw = React.createClass({displayName: "ViewRaw",
         }
     },
     renderContent: function () {
-        //return <pre>{this.state.content}</pre>;
-        return React.createElement(ValueEditor, {
+        return React.createElement("textarea", {
                 ref: "content", 
-                content: this.state.content, 
-                onDone: this.onContentChange, 
-                inline: true})
-    },
-    onContentChange: function (content) {
-        actions.FlowActions.updateContent(this.props.flow, this.props.message, content);
-    }
+                style: {width: "100%"}, 
+                defaultValue: this.state.content, 
+                onKeyDown: function(e) { e.stopPropagation(); }, 
+                onBlur: this.onContentChange
+                })
+   },
+   onContentChange: function (e) {
+       e.stopPropagation();
+       actions.FlowActions.updateContent(this.props.flow, this.props.message, e.target.value);
+   }
 });
 
 var json_regex = /^application\/json$/i;
